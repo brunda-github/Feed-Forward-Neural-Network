@@ -1,3 +1,7 @@
+import matplotlib.pyplot as plt
+from matplotlib.colors import Normalize
+from matplotlib.cm import ScalarMappable
+
 def plot_ConfusionMatrix(y_pred, y_true, title):
 
   confusion_matrix = np.zeros((len(class_names), len(class_names)), dtype=np.int32)
