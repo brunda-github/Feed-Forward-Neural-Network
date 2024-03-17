@@ -1,11 +1,15 @@
 import numpy as np
 
-
 class FFN:
-  def __init__(self, input, output, nHiddenLayers, nNeurons, batchsize, reg_lambda = 0, nEpochs = 50,eta = 0.001,activationfunc = "sigmoid"):
+  def __init__(self, input, output, nHiddenLayers, nNeurons, batchsize, reg_lambda = 0, nEpochs = 50,eta = 0.001,activationfunc = "sigmoid", losstype = "cross_entropy", valInput = None, valOutput = None, testInput = None, testOutput = None):
     self.x = input
     self.y = output
+    self.valx = valInput
+    self.valy = valOutput
+    self.testx = testInput
+    self.testy = testOutput
     self.nLayers = nHiddenLayers + 1 # +1 for output layer
+    self.losstype = losstype
 
     if isinstance(nNeurons, int):
       #same number of neurons in all hidden layers
@@ -30,13 +34,24 @@ class FFN:
     self.w = np.empty(self.nLayers+1, dtype = object)
     self.h[0] = input[0].flatten()
     self.arrloss = []
+    self.arrvalLoss = []
+    self.arrvalAcc = []
+    self.arrtestLoss = []
+    self.arrtestAcc = []
+    self.testpred = []
+    #Optimizer params
+    self.m = 0.9
+    self.beta = 0.9
+    self.beta1 = 0.9
+    self.beta2 = 0.99
+    self.epsilon = 1e-4
     return
 
   def initWeights(self, type):
     if type == "random":
       for k in range(1, self.nLayers + 1):
-        self.w[k] = np.random.randn(self.nNeurons[k], self.nNeurons[k-1])
-        self.b[k] = np.random.rand(self.nNeurons[k])
+        self.w[k] = np.random.randn(self.nNeurons[k], self.nNeurons[k-1]) * 0.01
+        self.b[k] = np.random.rand(self.nNeurons[k]) * 0.01
         # self.w[k] = np.random.uniform(low = -1, high = 1, size = (self.nNeurons[k], self.nNeurons[k-1]))
         # self.b[k] = np.random.uniform(low = -1, high = 1, size = self.nNeurons[k])
     if type == "ones":
@@ -49,6 +64,14 @@ class FFN:
         self.w[k] = np.random.normal(loc = 0.0, scale = std_dev, size = (self.nNeurons[k], self.nNeurons[k-1]))
         self.b[k] = np.zeros(self.nNeurons[k])
     return
+
+  def init_optimizer_params(self, m, beta, beta1, beta2, epsilon):
+      self.m = m
+      self.beta = beta
+      self.beta1 = beta1
+      self.beta2 = beta2
+      self.epsilon = epsilon
+      return
 
   def sigmoid(x):
     return [1 / (1 + np.exp(-x[i])) for i in range(len(x))]
@@ -80,13 +103,16 @@ class FFN:
   def Outputfunc(self, x):
     #Softmax
     #Subtract the maximum value from each element of x to prevent large exponentials that can lead to overflow.
-    e_x = np.exp(x - np.max(x))
-    return e_x / np.sum(e_x, axis=0)
+    x = np.nan_to_num(x)
+    e_x = np.exp(x - np.max(x, axis=0))
+    softmax = e_x / (1e-9 + np.sum(e_x, axis=0))
+
+    return softmax
 
 
-  def forward_propogation(self, index):
+  def forward_propogation(self, x,y,index):
     l = self.nLayers
-    self.h[0] = self.x[index].flatten()
+    self.h[0] = x[index].flatten()
 
     for k in range(1, l):
       self.a[k] = np.dot(self.w[k], self.h[k-1]) + self.b[k]
@@ -95,8 +121,12 @@ class FFN:
 
     self.ypred = self.Outputfunc(self.a[l])
     one_hot_vec = np.zeros(self.nNeurons[l], dtype = float)
-    one_hot_vec[self.y[index]] = 1
-    loss = -sum([one_hot_vec[i]*np.log2(self.ypred[i]+ 1e-9) for i in range(len(one_hot_vec))])
+    one_hot_vec[y[index]] = 1
+    if self.losstype == "squared_error":
+      loss = 0.5 * np.sum((one_hot_vec - self.ypred) ** 2)
+    else:
+      loss = -sum([one_hot_vec[i]*np.log2(self.ypred[i]+ 1e-9) for i in range(len(one_hot_vec))])
+
     return loss
 
   def back_propogation(self, index):
@@ -108,6 +138,8 @@ class FFN:
     one_hot_vec = np.zeros(self.nNeurons[l], dtype = float)
     one_hot_vec[self.y[index]] = 1
     dela = -(one_hot_vec - self.ypred)
+    if self.losstype == "squared_error":
+      dela = dela * self.ypred * (1 - self.ypred)
     delh = dela
     for k in range(l,0,-1):
       #Compute gradients w.r.t parameters
@@ -128,7 +160,7 @@ class FFN:
       gradb = np.zeros(self.b.shape, dtype = object)
       totalLoss = 0
       for i in range(self.x.shape[0]):
-        loss = self.forward_propogation(i)
+        loss = self.forward_propogation(self.x, self.y, i)
         (delw, delb) = self.back_propogation(i)
         totalLoss += loss
         for k in range(1, self.nLayers + 1):
@@ -137,6 +169,7 @@ class FFN:
           if (i+1)%self.batchsize == 0:
             self.w[k] = self.w[k] - eta * gradw[k]
             self.b[k] = self.b[k] - eta * gradb[k]
+        if (i+1)%self.batchsize == 0 :
             gradw = np.zeros(self.w.shape, dtype = object)
             gradb = np.zeros(self.b.shape, dtype = object)
       if self.x.shape[0] %self.batchsize != 0:
@@ -145,8 +178,19 @@ class FFN:
           self.b[k] = self.b[k] - eta * gradb[k]
 
       t += 1
+      if(not(self.valx is None) and not(self.valy is None)):
+        (acc, loss) = self.test(self.valx, self.valy)
+        self.arrvalLoss.append(loss)
+        self.arrvalAcc.append(acc)
+        print("Epoch",t, " Val loss ",loss, " Val acc ", acc)
+
+      if(not(self.testx is None) and not(self.testy is None)):
+        (acc, loss) = self.test(self.testx, self.testy)
+        self.arrtestLoss.append(loss)
+        self.arrtestAcc.append(acc)
+
       self.arrloss.append(totalLoss/self.x.shape[0])
-      print("Epoch",t, "loss",totalLoss/self.x.shape[0])
+
     return
 
   def do_momentum(self):
@@ -155,7 +199,7 @@ class FFN:
     prev_updb = np.zeros(self.b.shape, dtype = object)
     updw =  np.zeros(self.w.shape, dtype = object)
     updb = np.zeros(self.b.shape, dtype = object)
-    beta = 0.9
+    beta = self.m
     eta = self.eta
     nIterations = self.nEpochs
     while t < nIterations:
@@ -163,7 +207,7 @@ class FFN:
       gradb = np.zeros(self.b.shape, dtype = object)
       totalLoss = 0
       for i in range(self.x.shape[0]):
-          loss = self.forward_propogation(i)
+          loss = self.forward_propogation(self.x, self.y, i)
           (delw, delb) = self.back_propogation(i)
           totalLoss += loss
 
@@ -177,8 +221,9 @@ class FFN:
               self.b[k] = self.b[k] -  updb[k]
               prev_updw[k] = updw[k]
               prev_updb[k] = updb[k]
-              gradw = np.zeros(self.w.shape, dtype = object)
-              gradb = np.zeros(self.b.shape, dtype = object)
+          if (i+1)%self.batchsize == 0 :
+            gradw = np.zeros(self.w.shape, dtype = object)
+            gradb = np.zeros(self.b.shape, dtype = object)
 
       if self.x.shape[0] %self.batchsize != 0:
         for k in range(1, self.nLayers + 1):
@@ -191,7 +236,18 @@ class FFN:
 
       t+=1
       self.arrloss.append(totalLoss/self.x.shape[0])
-      print("Epoch",t, "loss",totalLoss/self.x.shape[0])
+
+      if(not(self.valx is None) and not(self.valy is None)):
+        (acc, loss) = self.test(self.valx, self.valy)
+        self.arrvalLoss.append(loss)
+        self.arrvalAcc.append(acc)
+        print("Epoch",t, " Val loss ",loss, " Val acc ", acc)
+
+      if(not(self.testx is None) and not(self.testy is None)):
+        (acc, loss) = self.test(self.testx, self.testy)
+        self.arrtestLoss.append(loss)
+        self.arrtestAcc.append(acc)
+
     return
 
   def do_NAG(self):
@@ -200,7 +256,7 @@ class FFN:
     prev_updb = np.zeros(self.b.shape, dtype = object)
     updw =  np.zeros(self.w.shape, dtype = object)
     updb = np.zeros(self.b.shape, dtype = object)
-    beta = 0.9
+    beta = self.m
     nIterations = self.nEpochs
     eta = self.eta
     while t < nIterations:
@@ -216,7 +272,7 @@ class FFN:
           for k in range(1, self.nLayers + 1):
             self.w[k] = self.w[k] - beta * prev_updw[k]
             self.b[k] = self.b[k] - beta * prev_updb[k]
-        loss = self.forward_propogation(i)
+        loss = self.forward_propogation(self.x, self.y, i)
         (delw, delb) = self.back_propogation(i)
         totalLoss += loss
         for k in range(1, self.nLayers + 1):
@@ -230,7 +286,7 @@ class FFN:
             updb[k] = beta * prev_updb[k] + eta * gradb[k]
             prev_updw[k] = updw[k]
             prev_updb[k] = updb[k]
-
+        if (i+1)%self.batchsize == 0 :
             gradw = np.zeros(self.w.shape, dtype = object)
             gradb = np.zeros(self.b.shape, dtype = object)
 
@@ -245,15 +301,25 @@ class FFN:
           prev_updb[k] = updb[k]
 
       self.arrloss.append(totalLoss/self.x.shape[0])
-      print("Epoch",t, "loss",totalLoss/self.x.shape[0])
+      if(not(self.valx is None) and not(self.valy is None)):
+        (acc, loss) = self.test(self.valx, self.valy)
+        self.arrvalLoss.append(loss)
+        self.arrvalAcc.append(acc)
+        print("Epoch",t, " Val loss ",loss, " Val acc ", acc)
+
+      if(not(self.testx is None) and not(self.testy is None)):
+        (acc, loss) = self.test(self.testx, self.testy)
+        self.arrtestLoss.append(loss)
+        self.arrtestAcc.append(acc)
+
       t += 1
     return
 
   def do_RMSProp(self):
     v_w = np.zeros(self.w.shape, dtype = object)
     v_b = np.zeros(self.b.shape, dtype = object)
-    beta = 0.9
-    eps = 1e-4
+    beta = self.beta
+    eps = self.epsilon
     t = 0
     eta = self.eta
     nIterations = self.nEpochs
@@ -262,7 +328,7 @@ class FFN:
       gradb = np.zeros(self.b.shape, dtype = object)
       totalLoss = 0
       for i in range(self.x.shape[0]):
-        loss = self.forward_propogation(i)
+        loss = self.forward_propogation(self.x, self.y, i)
         (delw, delb) = self.back_propogation(i)
         totalLoss += loss
         for k in range(1, self.nLayers + 1):
@@ -274,8 +340,10 @@ class FFN:
             self.w[k] = self.w[k] - eta * (1/np.sqrt(v_w[k] + eps)) * gradw[k]
             self.b[k] = self.b[k] - eta *(1/np.sqrt(v_b[k] + eps))* gradb[k]
 
+        if (i+1)%self.batchsize == 0 :
             gradw = np.zeros(self.w.shape, dtype = object)
             gradb = np.zeros(self.b.shape, dtype = object)
+
       if(self.x.shape[0]%self.batchsize != 0):
         for k in range(1, self.nLayers+1):
           v_w[k] = beta * v_w[k] + (1-beta)*np.square(gradw[k])
@@ -284,7 +352,17 @@ class FFN:
           self.b[k] = self.b[k] - eta *(1/np.sqrt(v_b[k] + eps))* gradb[k]
 
       self.arrloss.append(totalLoss/self.x.shape[0])
-      print("Epoch",t, "loss",totalLoss/self.x.shape[0])
+      if(not(self.valx is None) and not(self.valy is None)):
+        (acc, loss) = self.test(self.valx, self.valy)
+        self.arrvalLoss.append(loss)
+        self.arrvalAcc.append(acc)
+        print("Epoch",t, " Val loss ",loss, " Val acc ", acc)
+
+      if(not(self.testx is None) and not(self.testy is None)):
+        (acc, loss) = self.test(self.testx, self.testy)
+        self.arrtestLoss.append(loss)
+        self.arrtestAcc.append(acc)
+
       t += 1
     return
 
@@ -299,9 +377,9 @@ class FFN:
     v_b_hat = np.zeros(self.b.shape, dtype = object)
     m_w_hat = np.zeros(self.w.shape, dtype = object)
     m_b_hat = np.zeros(self.b.shape, dtype = object)
-    beta1 = 0.9
-    beta2 = 0.999
-    eps = 1e-4
+    beta1 = self.beta1
+    beta2 = self.beta2
+    eps = self.epsilon
     t = 0
     step = 1
     iter_mixed = 5;
@@ -314,7 +392,7 @@ class FFN:
       totalLoss = 0
 
       for i in range(self.x.shape[0]):
-        loss = self.forward_propogation(i)
+        loss = self.forward_propogation(self.x, self.y, i)
         (delw, delb) = self.back_propogation(i)
         totalLoss += loss
         for k in range(1, self.nLayers + 1):
@@ -334,9 +412,10 @@ class FFN:
             self.w[k] = self.w[k] - eta * (1/np.sqrt(v_w_hat[k] + eps)) * m_w_hat[k]
             self.b[k] = self.b[k] - eta *(1/np.sqrt(v_b_hat[k] + eps))* m_b_hat[k]
 
+            step += 1
+        if (i+1)%self.batchsize == 0 :
             gradw = np.zeros(self.w.shape, dtype = object)
             gradb = np.zeros(self.b.shape, dtype = object)
-            step += 1
 
       if self.x.shape[0]%self.batchsize != 0:
         for k in range(1, self.nLayers+1):
@@ -354,7 +433,17 @@ class FFN:
           self.b[k] = self.b[k] - eta *(1/np.sqrt(v_b_hat[k] + eps))* m_b_hat[k]
 
       self.arrloss.append(totalLoss/self.x.shape[0])
-      print("Epoch",t, "loss",totalLoss/self.x.shape[0])
+      if(not(self.valx is None) and not(self.valy is None)):
+        (acc, loss) = self.test(self.valx, self.valy)
+        self.arrvalLoss.append(loss)
+        self.arrvalAcc.append(acc)
+        print("Epoch",t, " Val loss ",loss, " Val acc ", acc)
+
+      if(not(self.testx is None) and not(self.testy is None)):
+        (acc, loss) = self.test(self.testx, self.testy)
+        self.arrtestLoss.append(loss)
+        self.arrtestAcc.append(acc)
+
       t+=1
     return
 
@@ -369,9 +458,9 @@ class FFN:
     v_b_hat = np.zeros(self.b.shape, dtype = object)
     m_w_hat = np.zeros(self.w.shape, dtype = object)
     m_b_hat = np.zeros(self.b.shape, dtype = object)
-    beta1 = 0.9
-    beta2 = 0.999
-    eps = 1e-10
+    beta1 = self.beta1
+    beta2 = self.beta2
+    eps = self.epsilon
     t = 0
     iter_mixed = 5
     ndata = 0
@@ -384,7 +473,7 @@ class FFN:
       totalLoss = 0
 
       for i in range(self.x.shape[0]):
-        loss = self.forward_propogation(i)
+        loss = self.forward_propogation(self.x, self.y,i)
         (delw, delb) = self.back_propogation(i)
         totalLoss += loss
         for k in range(1, self.nLayers + 1):
@@ -404,9 +493,11 @@ class FFN:
             self.w[k] = self.w[k] - eta * (1/np.sqrt(v_w_hat[k] + eps)) *(beta1*m_w_hat[k] + (1-beta1)*gradw[k]/(1-np.power(beta1, step)))
             self.b[k] = self.b[k] - eta *(1/np.sqrt(v_b_hat[k] + eps))* (beta1*m_b_hat[k]+ (1-beta1)*gradb[k]/(1-np.power(beta1, step)))
 
+            step +=1
+
+        if (i+1)%self.batchsize == 0 :
             gradw = np.zeros(self.w.shape, dtype = object)
             gradb = np.zeros(self.b.shape, dtype = object)
-            step +=1
 
       if self.x.shape[0]%self.batchsize != 0:
         for k in range(1, self.nLayers+1):
@@ -425,7 +516,17 @@ class FFN:
 
 
       self.arrloss.append(totalLoss/self.x.shape[0])
-      print("Epoch",t, "loss",totalLoss/self.x.shape[0])
+      if(not(self.valx is None) and not(self.valy is None)):
+        (acc, loss) = self.test(self.valx, self.valy)
+        self.arrvalLoss.append(loss)
+        self.arrvalAcc.append(acc)
+        print("Epoch",t, " Val loss ",loss, " Val acc ", acc)
+
+      if(not(self.testx is None) and not(self.testy is None)):
+        (acc, loss) = self.test(self.testx, self.testy)
+        self.arrtestLoss.append(loss)
+        self.arrtestAcc.append(acc)
+
       t+=1
     return
 
@@ -444,28 +545,25 @@ class FFN:
       self.do_nadam()
     return
 
+
   def test(self, x, y):
     crctpred = 0;
     totalloss = 0;
+    self.testpred.clear()
+
     for i in range(0,y.shape[0]):
-      l = self.nLayers
-      self.h[0] = x[i].flatten()
-      #print(self.h[0])
-      for k in range(1, l):
-        self.a[k] = np.dot(self.w[k], self.h[k-1]) + self.b[k]
-        self.h[k] = self.activationfunc_g(self.a[k])
-      self.a[l] = np.dot(self.w[l], self.h[l-1]) + self.b[l]
-      self.ypred = self.Outputfunc(self.a[l])
-      one_hot_vec = np.zeros(self.nNeurons[l], dtype = float)
-      one_hot_vec[self.y[i]] = 1
-      loss = -sum([one_hot_vec[k]*np.log2(self.ypred[k]+ 1e-9) for k in range(len(one_hot_vec))])
-      totalloss += loss
-      # print("prediction: {}", np.argmax(self.ypred))
-      # print("True Label: {}", y[i])
-      if(np.argmax(self.ypred) == y[i]):
-        crctpred+=1
+        totalloss += self.forward_propogation(x, y, i)
+        self.testpred.append(np.argmax(self.ypred))
+        if(np.argmax(self.ypred) == y[i]):
+            crctpred+=1
 
     accuracy = crctpred/y.shape[0] * 100
     totalloss /= y.shape[0]
     return (accuracy, totalloss)
+
+
+
+
+
+
 
