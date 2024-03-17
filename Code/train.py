@@ -70,6 +70,8 @@ def train_model(args, config = None):
   return
 
 if __name__ == "__main__":
+    #Update the login key if the project visibility is not open
+    #wandb.login(key = "")
     # Parse command-line arguments
     parser = argparse.ArgumentParser(description='Train neural network with specified configurations')
     parser.add_argument('--wandb_project', '-wp', type=str, default='basic-intro', help='Weights & Biases project name')
