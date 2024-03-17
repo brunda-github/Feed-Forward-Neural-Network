@@ -1,6 +1,6 @@
 This Github repository presents the codes for assignment 1 of CS6910.
 
-###train.py
+### train.py
 This python file can be executed to train a FFN model by passing required arguments as mentioned below
 
 | Name                | Description                                                                           |
@@ -26,15 +26,15 @@ This python file can be executed to train a FFN model by passing required argume
 
 
 -------------------------------------------------
-###FeedForwardNeuralNetwrok.py 
+### FeedForwardNeuralNetwrok.py 
 contains class FFN which represents the neural network model. 
 train method is used to train the model with optimizer as input
 test method can be used to test the model with input x and y as parameters
 
 -----------------------------------------------------------------------
-###PlotConfusionMatrix.py 
+### PlotConfusionMatrix.py 
 contains method to plot the confusion matrix provided true and predicted
 
 -----
-###SampleImagePlot.py
+### SampleImagePlot.py
 plots sample image of each class type in the given dataset
