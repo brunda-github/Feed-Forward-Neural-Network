@@ -1,5 +1,6 @@
 from keras.datasets import fashion_mnist
 from keras.datasets import mnist
+import matplotlib.pyplot as plt
 import wandb
 import numpy as np
 import argparse
@@ -59,10 +60,10 @@ def train_model(args, config = None):
     # img2 = plt.imread("Val_ConfusionMatrix.png")
     # wandb.log({"Val_ConfusionMatrix": wandb.Image(img2)})
 
-    # (test_acc, test_loss) = model.test(testDataInput,testDataOutput)
-    # plot_ConfusionMatrix(model.testpred, testDataOutput, "Test_ConfusionMatrix")
-    # img2 = plt.imread("Test_ConfusionMatrix.png")
-    # wandb.log({"Test_ConfusionMatrix": wandb.Image(img2)})
+    (test_acc, test_loss) = model.test(testDataInput,testDataOutput)
+    plot_ConfusionMatrix(model.testpred, testDataOutput, "Test_ConfusionMatrix")
+    img2 = plt.imread("Test_ConfusionMatrix.png")
+    wandb.log({"Test_ConfusionMatrix": wandb.Image(img2)})
 
     wandb.run.save()
     wandb.run.finish()
