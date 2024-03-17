@@ -13,3 +13,6 @@ Run the command by replacing myname myprojectname respectively
 Note: Make sure wandb project visibility is open. If not, make sure to call wandb.login() before initialising wandb runs
 
 --------------------------------------------------------------
+### Link to Wandb Report
+
+https://wandb.ai/drbruap/FeedForwardNeuralNetwork/reports/CS6910-Assignment-1--Vmlldzo3MTc5Mzcy
